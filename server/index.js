@@ -15,8 +15,28 @@ app.use(cors());
 app.use(express.json());
 
 app.get("/api/health", (_req, res) => {
-  const distExists = fs.existsSync(path.join(DIST_DIR, "index.html"));
-  res.json({ status: "ok", distExists });
+  res.json({ status: "ok", distExists: fs.existsSync(path.join(DIST_DIR, "index.html")) });
+});
+
+app.get("/api/debug", async (_req, res) => {
+  try {
+    const { chromium } = await import("playwright");
+    const browser = await chromium.launch({
+      headless: true,
+      args: ["--disable-dev-shm-usage", "--disable-gpu", "--no-sandbox", "--disable-setuid-sandbox"],
+    });
+    const page = await browser.newPage();
+    await page.goto("https://chatgpt.com/share/6a5522a8-e9fc-83ed-8a8c-2c46e8c50bae", { waitUntil: "load", timeout: 15000 });
+    const title = await page.title();
+    const sections = await page.evaluate(() =>
+      document.querySelectorAll('[data-testid^="conversation-turn-"]').length
+    );
+    const bodyText = await page.evaluate(() => document.body.innerText.substring(0, 500));
+    await browser.close();
+    res.json({ title, sections, bodyPreview: bodyText });
+  } catch (e) {
+    res.json({ error: e.message });
+  }
 });
 
 app.post("/api/jobs", (req, res) => {
@@ -57,15 +77,9 @@ app.post("/api/scrape", async (req, res) => {
 app.use(express.static(DIST_DIR));
 
 app.use((_req, res) => {
-  const indexPath = path.join(DIST_DIR, "index.html");
-  if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath);
-  } else {
-    res.status(500).send(`dist not found. Looking in: ${DIST_DIR}. Files: ${fs.readdirSync(DIST_DIR).join(", ")}`);
-  }
+  res.sendFile(path.join(DIST_DIR, "index.html"));
 });
 
 app.listen(PORT, () => {
-  console.log(`ChatGPT Exporter → http://localhost:${PORT}`);
-  console.log(`Dist dir: ${DIST_DIR}, exists: ${fs.existsSync(DIST_DIR)}`);
+  console.log(`ChatGPT Exporter → :${PORT}`);
 });
