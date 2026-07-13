@@ -12,6 +12,7 @@ import { enqueue, getJob } from "./queue.js";
 import { warmPool, closePool } from "../core/pool.js";
 import { getOgImage } from "./og-image.js";
 import { isValidShareUrl } from "../core/validate.js";
+import { getMetrics } from "./metrics.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -39,6 +40,10 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+app.get("/api/stats", (_req, res) => {
+  res.json(getMetrics());
+});
+
 app.get("/og-image.png", async (_req, res) => {
   try {
     const png = await getOgImage();
@@ -53,11 +58,11 @@ app.post("/api/jobs", (req, res) => {
   if (!isValidShareUrl(url)) {
     return res.status(400).json({ error: "Valid ChatGPT share URL required." });
   }
-  const jobId = enqueue(url.trim());
+  const { jobId, status } = enqueue(url.trim());
   if (!jobId) {
     return res.status(503).json({ error: "Server busy. Try again later." });
   }
-  res.json({ jobId, status: "queued" });
+  res.json({ jobId, status });
 });
 
 app.get("/api/jobs/:jobId", (req, res) => {

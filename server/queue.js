@@ -1,35 +1,30 @@
 import PQueue from "p-queue";
 import { LRUCache } from "lru-cache";
 import { scrapeChatGPT } from "../core/scraper.js";
+import { recordEnqueue, recordComplete, recordScrape, recordSuccess, recordFailure, recordCacheHit, recordCacheMiss } from "./metrics.js";
 
 const MAX_CONCURRENT = 2;
 const CACHE_MAX = 200;
 const CACHE_TTL = 60 * 60 * 1000;
 
-const cache = new LRUCache({
-  max: CACHE_MAX,
-  ttl: CACHE_TTL,
-});
-
+const cache = new LRUCache({ max: CACHE_MAX, ttl: CACHE_TTL });
 const jobs = new Map();
 const queue = new PQueue({ concurrency: MAX_CONCURRENT });
 
 export function enqueue(url) {
   const cached = cache.get(url);
   if (cached) {
+    recordCacheHit();
     const id = crypto.randomUUID();
     jobs.set(id, { id, status: "done", url, result: cached, createdAt: Date.now() });
-    return id;
+    return { jobId: id, status: "done" };
   }
 
+  recordCacheMiss();
+  recordEnqueue();
+
   const id = crypto.randomUUID();
-  jobs.set(id, {
-    id,
-    status: "queued",
-    url,
-    progress: { phase: "queued", message: "Waiting..." },
-    createdAt: Date.now(),
-  });
+  jobs.set(id, { id, status: "queued", url, progress: { phase: "queued", message: "Waiting..." }, createdAt: Date.now() });
 
   queue.add(async () => {
     const job = jobs.get(id);
@@ -43,15 +38,19 @@ export function enqueue(url) {
       job.result = result;
       job.completedAt = Date.now();
       cache.set(job.url, result);
+      recordScrape(result.method);
+      recordSuccess();
+      recordComplete();
     } catch (e) {
       job.status = "error";
       job.error = e.message;
       job.completedAt = Date.now();
+      recordFailure();
       console.error("[queue] Job failed:", e.message);
     }
   });
 
-  return id;
+  return { jobId: id, status: "queued" };
 }
 
 export function getJob(id) {
