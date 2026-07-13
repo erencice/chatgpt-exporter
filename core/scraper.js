@@ -1,29 +1,33 @@
 import { chromium } from "playwright";
+import { tryFastPath } from "./fastpath.js";
 
 const PAGE_WAIT_MS = 3000;
-const TURN_WAIT_MS = 90;
+const STRIDE = 6;
+const SCROLL_WAIT_MS = 200;
 
 export async function scrapeChatGPT(shareUrl, onProgress) {
+  onProgress?.({ phase: "fastpath", message: "Trying fast extraction..." });
+  const fast = await tryFastPath(shareUrl);
+  if (fast && fast.totalTurns > 0) {
+    onProgress?.({ phase: "done", message: `Done: ${fast.totalTurns} turns (instant)` });
+    return fast;
+  }
+
+  onProgress?.({ phase: "loading", message: "Launching browser..." });
+
   const browser = await chromium.launch({
     headless: true,
     args: [
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--single-process",
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-extensions",
-      "--disable-background-networking",
-      "--disable-sync",
-      "--no-first-run",
+      "--disable-dev-shm-usage", "--disable-gpu", "--single-process",
+      "--no-sandbox", "--disable-setuid-sandbox",
+      "--disable-extensions", "--disable-background-networking",
+      "--disable-sync", "--no-first-run",
     ],
   });
   const page = await browser.newPage();
   const startTime = Date.now();
 
   try {
-    onProgress?.({ phase: "loading", message: "Loading page..." });
-
     await page.goto(shareUrl, { waitUntil: "load", timeout: 30000 });
     await page.waitForTimeout(PAGE_WAIT_MS);
 
@@ -38,32 +42,42 @@ export async function scrapeChatGPT(shareUrl, onProgress) {
 
     onProgress?.({ phase: "scraping", message: `Found ${turnCount} turns`, total: turnCount, current: 0 });
 
-    const turns = [];
+    const extracted = new Map();
 
-    for (let i = 0; i < turnCount; i++) {
+    for (let i = 0; i < turnCount; i += STRIDE) {
+      const target = Math.min(i + Math.floor(STRIDE / 2), turnCount - 1);
+
       await page.evaluate((idx) => {
         const s = document.querySelectorAll('[data-testid^="conversation-turn-"]')[idx];
         if (s) s.scrollIntoView({ behavior: "instant", block: "center" });
-      }, i);
+      }, target);
 
-      await page.waitForTimeout(TURN_WAIT_MS);
+      await page.waitForTimeout(SCROLL_WAIT_MS);
 
-      const td = await page.evaluate((idx) => {
-        const s = document.querySelectorAll('[data-testid^="conversation-turn-"]')[idx];
-        if (!s) return null;
-        const text = s.textContent?.trim() || "";
-        return text.length > 0
-          ? { index: idx + 1, role: s.getAttribute("data-turn") || "unknown", content: text }
-          : null;
-      }, i);
+      const batch = await page.evaluate(() => {
+        const all = document.querySelectorAll('[data-testid^="conversation-turn-"]');
+        const res = [];
+        for (let j = 0; j < all.length; j++) {
+          const text = all[j].textContent?.trim() || "";
+          if (text.length > 0) {
+            res.push({
+              index: j + 1,
+              role: all[j].getAttribute("data-turn") || "unknown",
+              content: text,
+            });
+          }
+        }
+        return res;
+      });
 
-      if (td) turns.push(td);
-
-      if (i % 40 === 0 || i === turnCount - 1) {
-        onProgress?.({ phase: "scraping", message: `${i + 1}/${turnCount}`, total: turnCount, current: i + 1 });
+      for (const t of batch) {
+        if (!extracted.has(t.index)) extracted.set(t.index, t);
       }
+
+      onProgress?.({ phase: "scraping", message: `${extracted.size}/${turnCount}`, total: turnCount, current: extracted.size });
     }
 
+    const turns = [...extracted.values()].sort((a, b) => a.index - b.index);
     await browser.close();
 
     const elapsed = parseFloat(((Date.now() - startTime) / 1000).toFixed(1));
@@ -75,6 +89,7 @@ export async function scrapeChatGPT(shareUrl, onProgress) {
       totalTurns: turns.length,
       scrapedAt: new Date().toISOString(),
       elapsedSeconds: elapsed,
+      method: "playwright-batched",
     };
   } catch (e) {
     await browser.close();
