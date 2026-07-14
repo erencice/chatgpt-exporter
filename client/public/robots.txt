@@ -1,0 +1,8 @@
+# robots.txt — ChatGPT Exporter by Pactis
+# https://chatgpt-exporter.pactis-ai.com/robots.txt
+
+User-agent: *
+Allow: /
+
+# Sitemap
+Sitemap: https://chatgpt-exporter.pactis-ai.com/sitemap.xml
