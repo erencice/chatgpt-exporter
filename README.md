@@ -141,37 +141,6 @@ Add to your MCP client config:
 
 ---
 
-## Deploy
-
-### Railway (recommended)
-
-1. Push to GitHub
-2. [railway.app](https://railway.app) → New Project → Deploy from GitHub
-3. Build command: `npm install && npm run build`
-4. Start command: `npm start`
-5. Env var: `PORT=3001`
-
-Fast-path only — no Chromium needed.
-
-### Docker
-
-```bash
-# Slim (fast-path only, ~150MB)
-docker build --target slim -t chatgpt-exporter .
-docker run -p 3001:3001 chatgpt-exporter
-
-# Full (with Chromium fallback, ~450MB)
-docker build --target full -t chatgpt-exporter:full .
-```
-
-### CI/CD
-
-GitHub Actions runs on every push/PR:
-- `test` — `npm ci` → `npm test` → `npm run build`
-- `security` — `npm audit --audit-level=high`
-
----
-
 ## Security
 
 | Layer | Detail |
